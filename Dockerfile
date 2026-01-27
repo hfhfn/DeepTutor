@@ -79,14 +79,25 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # ============================================
+# GPU Acceleration Support
+# ============================================
+# Force install GPU versions of critical libraries for MinerU/Magic-PDF
+# Moving these heavy libraries to the base stage so they are cached
+# and not re-installed when application code changes.
+RUN pip uninstall -y onnxruntime && \
+    pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ && \
+    pip install "magic-pdf==0.7.0b1" ultralytics paddlepaddle-gpu && \
+    pip install --no-deps "magic-pdf[full]==0.7.0b1" || true
+
+# ============================================
 # Stage 3: Production Image
 # ============================================
 FROM python:3.11-slim AS production
 
 # Labels
 LABEL maintainer="DeepTutor Team" \
-      description="DeepTutor: AI-Powered Personalized Learning Assistant" \
-      version="0.1.0"
+    description="DeepTutor: AI-Powered Personalized Learning Assistant" \
+    version="0.1.0"
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -131,13 +142,6 @@ COPY --from=frontend-builder /app/web/package.json ./web/package.json
 COPY --from=frontend-builder /app/web/next.config.js ./web/next.config.js
 COPY --from=frontend-builder /app/web/node_modules ./web/node_modules
 
-# Copy application source code
-COPY src/ ./src/
-COPY config/ ./config/
-COPY scripts/ ./scripts/
-COPY pyproject.toml ./
-COPY requirements.txt ./
-
 # Create necessary directories (these will be overwritten by volume mounts)
 RUN mkdir -p \
     data/user/solve \
@@ -152,6 +156,37 @@ RUN mkdir -p \
     data/user/run_code_workspace \
     data/user/performance \
     data/knowledge_bases
+
+# Link python site-packages libs to system lib path so ONNX Runtime can find them
+# This is also moved up to be part of the configuration layers
+RUN for dir in /usr/local/lib/python3.11/site-packages/nvidia/*/lib; do \
+    if [ -d "$dir" ]; then \
+    ln -sf $dir/*.so* /usr/lib/x86_64-linux-gnu/; \
+    fi \
+    done && ldconfig
+
+# Create correct magic-pdf.json config
+RUN cat > /root/magic-pdf.json <<'EOF'
+{
+    "device-mode": "cuda",
+    "layout-config": {
+        "model": "doclayout_yolo"
+    },
+    "formula-config": {
+        "mfd_model": "yolo_v8_mfd",
+        "mfr_model": "unimernet_small",
+        "enable": true
+    },
+    "table-config": {
+        "model": "tablemaster",
+        "enable": true,
+        "max_time": 100
+    }
+}
+EOF
+
+# Supervisor configuration (moved up)
+RUN mkdir -p /etc/supervisor/conf.d
 
 # Create supervisord configuration for running both services
 # Log output goes to stdout/stderr so docker logs can capture them
@@ -302,6 +337,17 @@ exec /usr/bin/supervisord -c /etc/supervisor/conf.d/deeptutor.conf
 EOF
 
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# ============================================
+# Copy Application Source Code (LAST STEP)
+# ============================================
+# Copying application code at the very end ensures that code changes
+# do not invalidate the heavy library installation layers above.
+COPY src/ ./src/
+COPY config/ ./config/
+COPY scripts/ ./scripts/
+COPY pyproject.toml ./
+COPY requirements.txt ./
 
 # Expose ports
 EXPOSE 8001 3782

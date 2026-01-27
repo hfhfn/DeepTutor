@@ -42,7 +42,7 @@ class RAGAnythingDoclingPipeline:
     def __init__(
         self,
         kb_base_dir: Optional[str] = None,
-        enable_image_processing: bool = True,
+        enable_image_processing: bool = False,
         enable_table_processing: bool = True,
         enable_equation_processing: bool = True,
     ):
@@ -151,6 +151,7 @@ class RAGAnythingDoclingPipeline:
             True if successful
         """
         import json
+        from tqdm import tqdm
 
         from ..components.routing import FileTypeRouter
         from ..utils.image_migration import (
@@ -182,17 +183,24 @@ class RAGAnythingDoclingPipeline:
             await rag._ensure_lightrag_initialized()
 
             total_files = len(classification.needs_mineru) + len(classification.text_files)
-            idx = 0
             total_images_migrated = 0
+
+            progress_callback = kwargs.get("progress_callback")
+            if progress_callback:
+                progress_callback(0, total_files, "Step 0/3: Initializing RAG Engine...")
+
+            pbar = tqdm(total=total_files, desc=f"Initializing KB '{kb_name}'")
 
             # Process files requiring Docling (PDF, DOCX, images, HTML)
             for file_path in classification.needs_mineru:
-                idx += 1
                 file_name = Path(file_path).name
-                self.logger.info(f"Processing [{idx}/{total_files}] (Docling): {file_name}")
+                pbar.set_postfix_str(f"Processing: {file_name}")
+                self.logger.info(f"Processing (Docling): {file_name}")
 
                 # Step 1: Parse document (without RAG insertion)
                 self.logger.info("  Step 1/3: Parsing document...")
+                if progress_callback:
+                    progress_callback(pbar.n, total_files, f"{file_name} (Step 1/3: Parsing)")
                 content_list, doc_id = await rag.parse_document(
                     file_path=file_path,
                     output_dir=str(content_list_dir),
@@ -201,6 +209,8 @@ class RAGAnythingDoclingPipeline:
 
                 # Step 2: Migrate images and update paths
                 self.logger.info("  Step 2/3: Migrating images to canonical location...")
+                if progress_callback:
+                    progress_callback(pbar.n, total_files, f"{file_name} (Step 2/3: Migrating)")
                 updated_content_list, num_migrated = await migrate_images_and_update_paths(
                     content_list=content_list,
                     source_base_dir=content_list_dir,
@@ -216,24 +226,35 @@ class RAGAnythingDoclingPipeline:
 
                 # Step 3: Insert into RAG with corrected paths
                 self.logger.info("  Step 3/3: Inserting into RAG knowledge graph...")
+                if progress_callback:
+                    progress_callback(pbar.n, total_files, f"{file_name} (Step 3/3: Indexing - This may take a while)")
                 await rag.insert_content_list(
                     content_list=updated_content_list,
                     file_path=file_path,
                     doc_id=doc_id,
                 )
 
+                pbar.update(1)
+                if progress_callback:
+                    progress_callback(pbar.n, total_files, file_name)
                 self.logger.info(f"  ✓ Completed: {file_name}")
 
             # Process text files directly (fast path)
             for file_path in classification.text_files:
-                idx += 1
+                file_name = Path(file_path).name
+                pbar.set_postfix_str(f"Processing: {file_name}")
                 self.logger.info(
-                    f"Processing [{idx}/{total_files}] (direct text): {Path(file_path).name}"
+                    f"Processing (direct text): {file_name}"
                 )
                 content = await FileTypeRouter.read_text_file(file_path)
                 if content.strip():
                     # Insert directly into LightRAG, bypassing parser
                     await rag.lightrag.ainsert(content)
+                pbar.update(1)
+                if progress_callback:
+                    progress_callback(pbar.n, total_files, file_name)
+
+            pbar.close()
 
             # Log unsupported files
             for file_path in classification.unsupported:

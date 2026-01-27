@@ -17,12 +17,12 @@ tools:
   run_code:
     workspace: ./data/user/run_code_workspace
     allowed_roots:
-    - ./data/user
-    - ./src/tools
+      - ./data/user
+      - ./src/tools
   web_search:
     enabled: true
     consolidation: template
-    consolidation_template: ''
+    consolidation_template: ""
     provider: jina
   query_item:
     enabled: true

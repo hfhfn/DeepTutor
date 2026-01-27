@@ -236,12 +236,28 @@ class KnowledgeBaseInitializer:
         # Convert Path objects to strings for file paths
         file_paths = [str(doc_file) for doc_file in doc_files]
 
+        # Define progress callback to update ProgressTracker in real-time
+        def progress_callback(current: int, total: int, file_name: str = ""):
+            # If file_name contains sub-step info, incorporate it into the main message
+            display_msg = f"Processing ({current}/{total})"
+            if file_name:
+                display_msg += f": {file_name}"
+            
+            self.progress_tracker.update(
+                ProgressStage.PROCESSING_DOCUMENTS,
+                display_msg,
+                current=current,
+                total=total,
+                file_name=file_name
+            )
+
         try:
             # Process all documents using the RAGService
             success = await rag_service.initialize(
                 kb_name=self.kb_name,
                 file_paths=file_paths,
                 extract_numbered_items=True,  # Enable numbered items extraction
+                progress_callback=progress_callback,
             )
 
             if success:

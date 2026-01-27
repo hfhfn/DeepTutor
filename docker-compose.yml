@@ -76,6 +76,8 @@ services:
       - NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-}
 
     volumes:
+      # Mount local source code for fast iteration (no rebuild needed for Python changes)
+      - ./src:/app/src
       # Mount local config directory (read-only)
       - ./config:/app/config:ro
       # Mount local data directory for persistence (read-write)
@@ -92,6 +94,18 @@ services:
 
     networks:
       - deeptutor-network
+
+    # ============================================
+    # GPU Configuration for NVIDIA
+    # ============================================
+    # Enables NVIDIA GPU access for minerU PDF parsing acceleration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # 使用所有可用的 GPU，也可以改为 1 只使用一个
+              capabilities: [gpu]
 
 # ============================================
 # Networks
