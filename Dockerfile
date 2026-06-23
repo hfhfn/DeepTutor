@@ -42,7 +42,7 @@ RUN npm run build
 # ============================================
 # Stage 2: Python Base with Dependencies
 # ============================================
-FROM python:3.11-slim AS python-base
+FROM python:3.14-slim AS python-base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -92,7 +92,7 @@ RUN pip uninstall -y onnxruntime && \
 # ============================================
 # Stage 3: Production Image
 # ============================================
-FROM python:3.11-slim AS production
+FROM python:3.14-slim AS production
 
 # Labels
 LABEL maintainer="DeepTutor Team" \
